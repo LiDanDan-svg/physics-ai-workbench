@@ -12,6 +12,8 @@ def empty_workspace() -> Dict[str, Any]:
         "students": [],
         "exams": [],
         "questions": [],
+        "paper_templates": [],
+        "practice_sets": [],
         "ai_reports": {},
         "settings": {
             "teacher_name": "旦旦老师",
