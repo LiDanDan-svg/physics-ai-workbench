@@ -1,3 +1,5 @@
 streamlit>=1.40
 pandas>=2.1
 plotly>=5.20
+supabase>=2.0
+openai>=1.0
