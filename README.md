@@ -1,52 +1,46 @@
-# 旦旦物理 · AI教学工作台 V1.1
+# 旦旦物理 · AI教学工作台 V1.1.1（中国大陆AI版）
 
 面向独立物理老师的轻量教学工作台。
 
-## V1.1新增
-- Supabase 教师邮箱/密码登录
-- 云端工作区持久化，多设备同步
-- Row Level Security：每个教师只读取自己的工作区
-- 多次考试纵向知识点变化
-- 真AI教师诊断（可选 OpenAI API）
-- 家长版学情报告
-- 本周教学任务
-- 30天提升方案升级
-- 数据置信度与“可改善失分量”表述，避免把估算写成提分承诺
+## V1.1.1 新增
 
-## 直接部署
-即使不配置 Supabase / AI，V1.1 也能以“本地原型 + 规则诊断”方式运行。
+- AI底层从 OpenAI API 切换为 **阿里云百炼 / 通义千问**
+- 默认模型：`qwen3.8-flash`
+- 默认中国大陆接入地址：`https://dashscope.aliyuncs.com/compatible-mode/v1`
+- 支持百炼 OpenAI 兼容 Responses API，并自动回退 Chat Completions
+- 教师版诊断、家长报告、本周教学任务、30天方案全部支持千问生成
+- 新增 **AI数据隐私预览**：调用前可查看本次发送给AI的教学摘要
+- 默认不把学生姓名、学校发送给AI
+- AI失败时仍可继续使用规则诊断
+- 保留 Supabase 教师登录、云数据库、多设备同步
 
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
-
-## 正式云端数据配置
-1. 创建 Supabase 项目。
-2. 在 SQL Editor 执行 `supabase_setup.sql`。
-3. 在 Authentication 中创建/注册教师账号（可保留邮箱确认）。
-4. 在 Streamlit App -> Settings -> Secrets 中配置：
+## Streamlit Secrets
 
 ```toml
 SUPABASE_URL = "https://YOUR_PROJECT.supabase.co"
 SUPABASE_PUBLISHABLE_KEY = "sb_publishable_xxx"
-ALLOWED_TEACHER_EMAIL = "your@email.com"
+ALLOWED_TEACHER_EMAIL = "teacher@example.com"
+
+DASHSCOPE_API_KEY = "sk-..."
+QWEN_MODEL = "qwen3.8-flash"
+DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 ```
 
-Supabase Python 客户端使用邮箱+密码登录，数据库表启用 RLS，数据按 `auth.uid()` 隔离。
+> 百炼 API Key 只放 Streamlit Secrets，不要提交到 GitHub。
 
-## 真AI配置
-在 Streamlit Secrets 增加：
+## 百炼配置建议
 
-```toml
-OPENAI_API_KEY = "你的API Key"
-OPENAI_MODEL = "gpt-5.6-luna"
-```
+1. 在阿里云百炼开通模型服务。
+2. 优先使用华北2（北京）地域。
+3. 创建 API Key。
+4. 将 Key 填入 `DASHSCOPE_API_KEY`。
+5. 第一阶段使用 `qwen3.8-flash` 做学情诊断和家长报告即可。
+6. 如使用业务空间专属域名，可把 `DASHSCOPE_BASE_URL` 换成对应空间的 OpenAI 兼容 Base URL。
 
-不配置 API Key 时，系统自动回退到可解释规则版，不影响其他功能。
+## 隐私边界
 
-## 隐私原则
-- 推荐学生编号/化名；
-- 不采集身份证号、家庭住址等无关敏感信息；
-- AI报告仅发送当前学生的教学摘要，并要求教师审核；
-- API Key 与数据库 Key 只放 Streamlit Secrets，不提交 GitHub。
+- 建议学生使用编号/化名。
+- 不录入身份证号、家庭住址等与教学无关的数据。
+- 默认不向AI发送学生显示名称和学校。
+- 教师备注会作为教学上下文发送给AI，请不要在备注中填写无关敏感信息。
+- 所有家长报告、AI诊断在对外发送前都应由教师人工审核。

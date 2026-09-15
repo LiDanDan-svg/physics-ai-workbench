@@ -14,10 +14,10 @@ from analytics import (
     longitudinal_topic_changes, student_snapshot,
 )
 from reporting import diagnosis_report, parent_report, weekly_teaching_plan, plan_30_days
-from ai_engine import ai_configured, generate_ai_report
+from ai_engine import ai_configured, generate_ai_report, ai_payload_preview, DEFAULT_DASHSCOPE_BASE_URL, DEFAULT_QWEN_MODEL
 
 st.set_page_config(page_title="旦旦物理 · AI教学工作台", page_icon="🧠", layout="wide")
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 
 st.markdown("""
 <style>
@@ -38,11 +38,12 @@ def secret(name: str, default=""):
 SUPABASE_URL = str(secret("SUPABASE_URL", "")).strip()
 SUPABASE_KEY = str(secret("SUPABASE_PUBLISHABLE_KEY", "")).strip()
 ALLOWED_EMAIL = str(secret("ALLOWED_TEACHER_EMAIL", "")).strip().lower()
-OPENAI_API_KEY = str(secret("OPENAI_API_KEY", "")).strip()
-OPENAI_MODEL = str(secret("OPENAI_MODEL", "gpt-5.6-luna")).strip() or "gpt-5.6-luna"
-OPENAI_BASE_URL = str(secret("OPENAI_BASE_URL", "")).strip()
+DASHSCOPE_API_KEY = str(secret("DASHSCOPE_API_KEY", "")).strip()
+QWEN_MODEL = str(secret("QWEN_MODEL", DEFAULT_QWEN_MODEL)).strip() or DEFAULT_QWEN_MODEL
+DASHSCOPE_BASE_URL = str(secret("DASHSCOPE_BASE_URL", DEFAULT_DASHSCOPE_BASE_URL)).strip() or DEFAULT_DASHSCOPE_BASE_URL
 CLOUD_MODE = bool(SUPABASE_URL and SUPABASE_KEY)
-AI_READY = ai_configured(OPENAI_API_KEY)
+AI_READY = ai_configured(DASHSCOPE_API_KEY)
+AI_PROVIDER_LABEL = f"阿里云百炼 · {QWEN_MODEL}"
 
 
 def cloud_login_gate():
@@ -50,7 +51,7 @@ def cloud_login_gate():
     if st.session_state.get("sb_client") and st.session_state.get("teacher_user"):
         return
     st.title("🧠 旦旦物理 · AI教学工作台")
-    st.caption(f"V{APP_VERSION}｜教师登录 · 云端学生数据 · 真AI诊断 · 家长报告")
+    st.caption(f"V{APP_VERSION}｜教师登录 · 云端学生数据 · 百炼千问AI · 家长报告")
     st.info("当前已启用 Supabase 云端模式。请使用教师账号登录。")
     login_tab, signup_tab = st.tabs(["🔐 教师登录", "🆕 首次创建账号"])
     with login_tab:
@@ -132,26 +133,36 @@ def report_key(kind, sid):
 def render_ai_or_rule(kind: str, student: dict, fallback: str):
     key = report_key(kind, student["student_id"])
     saved = data.get("ai_reports", {}).get(key)
+
+    with st.expander("🔎 查看本次发送给AI的数据摘要（隐私预览）", expanded=False):
+        preview = ai_payload_preview(data, student)
+        st.json(preview)
+        st.caption("默认不会把学生显示名称、学校、身份证号、家庭住址等直接识别信息发送给AI。教师备注会发送，请勿在备注中填写无关敏感信息。")
+
     if AI_READY:
-        if st.button("✨ 生成/刷新真AI报告", key=f"ai_{kind}_{student['student_id']}", type="primary"):
+        if st.button("✨ 生成/刷新百炼AI报告", key=f"ai_{kind}_{student['student_id']}", type="primary"):
             try:
-                with st.spinner("AI 正在读取学情数据并生成报告..."):
-                    text = generate_ai_report(kind, data, student, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL)
+                with st.spinner("千问正在读取学情摘要并生成报告..."):
+                    text = generate_ai_report(
+                        kind, data, student,
+                        DASHSCOPE_API_KEY, QWEN_MODEL, DASHSCOPE_BASE_URL
+                    )
                 data.setdefault("ai_reports", {})[key] = text
-                persist(); st.success("AI报告已生成"); st.rerun()
+                persist(); st.success("百炼AI报告已生成"); st.rerun()
             except Exception as e:
-                st.error(f"AI生成失败：{e}")
+                st.error(f"百炼AI生成失败：{e}")
         if saved:
-            st.success(f"当前显示真AI报告 · 模型 {OPENAI_MODEL}")
+            st.success(f"当前显示百炼AI报告 · 模型 {QWEN_MODEL}")
             return saved
-        st.info("已配置AI，但尚未生成该学生的AI报告。下方先显示规则版。")
+        st.info("已配置阿里云百炼，但尚未生成该学生的AI报告。下方先显示规则版。")
         return fallback
-    st.info("当前未配置AI API，显示可解释规则版。配置后可一键生成真AI报告。")
+
+    st.info("当前未配置阿里云百炼 API，显示可解释规则版。配置后可一键生成千问AI报告。")
     return fallback
 
 
 st.title("🧠 旦旦物理 · AI教学工作台")
-st.caption(f"V{APP_VERSION}｜云端学生档案 · 纵向学情 · 真AI诊断 · 家长报告 · 本周教学任务")
+st.caption(f"V{APP_VERSION}｜云端学生档案 · 纵向学情 · 百炼千问AI · 家长报告 · 本周教学任务")
 if CLOUD_MODE:
     user_email = getattr(st.session_state.teacher_user, "email", "教师账号")
     st.success(f"☁️ 云端模式已连接 · 当前教师：{user_email}")
@@ -194,9 +205,9 @@ with st.sidebar:
 
     st.subheader("🧠 AI状态")
     if AI_READY:
-        st.success(f"已连接：{OPENAI_MODEL}")
+        st.success(f"已连接：{AI_PROVIDER_LABEL}")
     else:
-        st.info("未配置AI API，当前使用规则诊断")
+        st.info("未配置阿里云百炼 API，当前使用规则诊断")
 
 students = data.get("students", [])
 exams = data.get("exams", [])
@@ -389,11 +400,17 @@ with tabs[9]:
             st.code('SUPABASE_URL = "https://xxxx.supabase.co"\nSUPABASE_PUBLISHABLE_KEY = "sb_publishable_xxx"\nALLOWED_TEACHER_EMAIL = "你的邮箱"')
             st.caption("先在 Supabase SQL Editor 执行项目内 supabase_setup.sql，再把以上值放进 Streamlit Secrets。")
     with b:
-        st.markdown("#### 🧠 真AI")
-        if AI_READY: st.success(f"AI已配置：{OPENAI_MODEL}")
+        st.markdown("#### 🧠 中国大陆AI · 阿里云百炼")
+        if AI_READY:
+            st.success(f"百炼AI已配置：{QWEN_MODEL}")
+            st.caption(f"Base URL：{DASHSCOPE_BASE_URL}")
         else:
-            st.warning("尚未配置AI API，目前使用规则版报告。")
-            st.code('OPENAI_API_KEY = "你的API Key"\nOPENAI_MODEL = "gpt-5.6-luna"\n# OPENAI_BASE_URL = "可选，OpenAI兼容地址"')
-            st.caption("API Key 只放 Streamlit Secrets，不要上传 GitHub。")
+            st.warning("尚未配置百炼 API，目前使用规则版报告。")
+            st.code(
+                'DASHSCOPE_API_KEY = "你的百炼API Key"\n'
+                'QWEN_MODEL = "qwen3.8-flash"\n'
+                'DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"'
+            )
+            st.caption("API Key 只放 Streamlit Secrets，不要上传 GitHub。默认使用华北2（北京）OpenAI兼容地址。")
     st.markdown("#### 当前数据边界")
-    st.write("V1.1 不上传身份证号、家庭住址等无关信息；家长报告和AI诊断均需教师审核；AI只接收当前学生的教学数据摘要。")
+    st.write("V1.1.1 默认不把学生姓名和学校发送给AI；家长报告和AI诊断均需教师审核；AI只接收当前学生的教学数据摘要。")

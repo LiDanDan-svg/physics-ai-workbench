@@ -10,47 +10,121 @@ SYSTEM_RULES = """你是一名严谨的高中物理教学诊断助手。你的�
 3. 不承诺提分，不使用“保证、必然、一定能提高X分”等措辞。
 4. 优先识别可行动的问题：知识漏洞、模型识别、受力分析、临界判断、数学处理、综合迁移。
 5. 建议必须具体到下一步教学动作、题型或检测方式，避免空泛鼓励。
-6. 输出中文 Markdown，结构清晰，适合老师直接使用或二次编辑。
+6. 对“可改善失分量”只能作为样本内估算，必须提醒并非提分承诺。
+7. 输出中文 Markdown，结构清晰，适合老师直接使用或二次编辑。
 """
+
+DEFAULT_DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+DEFAULT_QWEN_MODEL = "qwen3.8-flash"
 
 
 def ai_configured(api_key: str | None) -> bool:
     return bool(api_key and str(api_key).strip())
 
 
-def _prompt_for(kind: str, student: dict, snapshot: Dict[str, Any]) -> str:
-    name = student.get("display_name", "学生")
+def build_ai_payload(student: dict, snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """只发送教学所需的最小化数据。默认不发送学生姓名、学校等直接识别信息。"""
     profile = {
         "student_id": student.get("student_id"),
-        "display_name": name,
         "grade": student.get("grade"),
         "target_score": student.get("target_score"),
         "teacher_notes": student.get("notes", ""),
     }
-    data_json = json.dumps({"student": profile, "learning_snapshot": snapshot}, ensure_ascii=False, indent=2)
+    return {"student": profile, "learning_snapshot": snapshot}
+
+
+def ai_payload_preview(data: dict, student: dict) -> Dict[str, Any]:
+    return build_ai_payload(student, student_snapshot(data, student["student_id"]))
+
+
+def _prompt_for(kind: str, payload: Dict[str, Any]) -> str:
+    data_json = json.dumps(payload, ensure_ascii=False, indent=2)
     if kind == "diagnosis":
-        task = "生成教师版学情诊断：一句话结论、证据、趋势、优势、核心瓶颈、错误机制推断（标注推断）、下节课优先处理、验证方法。"
+        task = (
+            "生成教师版学情诊断。按以下结构输出："
+            "一句话结论；事实证据；学习趋势；优势；核心瓶颈；"
+            "错误机制推断（必须明确标注为推断）；下节课优先处理；"
+            "建议训练题型；复测方法；数据局限。"
+        )
     elif kind == "parent":
-        task = "生成家长版阶段学情报告：语言通俗、克制，不制造焦虑；说明进步、当前主要问题、下一阶段教学安排和家长可配合事项。不要承诺提分。"
+        task = (
+            "生成家长版阶段学情报告。语言通俗、克制，不制造焦虑；"
+            "说明阶段变化、当前主要问题、下一阶段教学安排和家长可配合事项。"
+            "不要使用过多技术术语，不承诺提分。"
+        )
     elif kind == "weekly":
-        task = "生成未来7天/本周教学任务：按课次列目标、典型题训练方向、作业、复测标准；优先处理最薄弱且最可行动的问题。"
+        task = (
+            "生成未来7天/本周教学任务。按课次列出：目标、典型题训练方向、"
+            "课堂动作、课后作业、复测标准；优先处理最薄弱且最可行动的问题。"
+        )
     else:
-        task = "生成30天提升方案：四周分阶段目标、教学重点、训练结构、周测和进入下一阶段的判断标准。"
+        task = (
+            "生成30天提升方案。分4周输出：阶段目标、教学重点、训练结构、"
+            "作业与周测、进入下一阶段的判断标准；最后给出风险点和调整条件。"
+        )
     return f"{task}\n\n以下是唯一可用的数据：\n```json\n{data_json}\n```"
 
 
-def generate_ai_report(kind: str, data: dict, student: dict, api_key: str, model: str = "gpt-5.6-luna", base_url: str = "") -> str:
+def _extract_chat_text(response) -> str:
+    try:
+        return response.choices[0].message.content or ""
+    except Exception:
+        return ""
+
+
+def generate_ai_report(
+    kind: str,
+    data: dict,
+    student: dict,
+    api_key: str,
+    model: str = DEFAULT_QWEN_MODEL,
+    base_url: str = DEFAULT_DASHSCOPE_BASE_URL,
+) -> str:
+    """
+    阿里云百炼 / 通义千问中国大陆版。
+    使用 OpenAI Python SDK 调用百炼 OpenAI 兼容接口。
+    优先使用 Responses API；若当前模型/账户的 Responses 能力异常，
+    自动回退到 Chat Completions。
+    """
     from openai import OpenAI
-    snapshot = student_snapshot(data, student["student_id"])
-    kwargs = {"api_key": api_key}
-    if base_url and base_url.strip():
-        kwargs["base_url"] = base_url.strip()
-    client = OpenAI(**kwargs)
-    response = client.responses.create(
-        model=model,
-        input=SYSTEM_RULES + "\n\n" + _prompt_for(kind, student, snapshot),
-    )
-    text = getattr(response, "output_text", None)
-    if not text:
-        raise RuntimeError("AI 返回为空，请检查模型或API配置")
-    return text.strip()
+
+    if not ai_configured(api_key):
+        raise RuntimeError("尚未配置 DASHSCOPE_API_KEY")
+
+    base_url = (base_url or DEFAULT_DASHSCOPE_BASE_URL).strip()
+    model = (model or DEFAULT_QWEN_MODEL).strip()
+    payload = build_ai_payload(student, student_snapshot(data, student["student_id"]))
+    prompt = SYSTEM_RULES + "\n\n" + _prompt_for(kind, payload)
+
+    client = OpenAI(api_key=api_key.strip(), base_url=base_url)
+
+    # 百炼当前支持 OpenAI 兼容 Responses API；为兼容权限/模型差异，失败时回退 Chat。
+    response_error = None
+    try:
+        response = client.responses.create(model=model, input=prompt)
+        text = getattr(response, "output_text", None)
+        if text and str(text).strip():
+            return str(text).strip()
+    except Exception as e:
+        response_error = e
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": SYSTEM_RULES},
+                {"role": "user", "content": _prompt_for(kind, payload)},
+            ],
+            temperature=0.3,
+        )
+        text = _extract_chat_text(response)
+        if text and text.strip():
+            return text.strip()
+    except Exception as chat_error:
+        if response_error:
+            raise RuntimeError(
+                f"百炼AI调用失败。Responses错误：{response_error}；Chat回退错误：{chat_error}"
+            ) from chat_error
+        raise RuntimeError(f"百炼AI调用失败：{chat_error}") from chat_error
+
+    raise RuntimeError("百炼AI返回为空，请检查API Key、地域、模型权限或Base URL")
