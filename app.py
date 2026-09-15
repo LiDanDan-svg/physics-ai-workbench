@@ -14,10 +14,33 @@ from analytics import (
     longitudinal_topic_changes, student_snapshot,
 )
 from reporting import diagnosis_report, parent_report, weekly_teaching_plan, plan_30_days
-from ai_engine import ai_configured, generate_ai_report, ai_payload_preview, DEFAULT_DASHSCOPE_BASE_URL, DEFAULT_QWEN_MODEL
+import ai_engine as _ai_engine
+
+ai_configured = _ai_engine.ai_configured
+generate_ai_report = _ai_engine.generate_ai_report
+DEFAULT_DASHSCOPE_BASE_URL = getattr(_ai_engine, "DEFAULT_DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+DEFAULT_QWEN_MODEL = getattr(_ai_engine, "DEFAULT_QWEN_MODEL", "qwen3.8-flash")
+AI_ENGINE_VERSION = getattr(_ai_engine, "ENGINE_VERSION", "legacy-compatible")
+
+def ai_payload_preview(data, student):
+    fn = getattr(_ai_engine, "ai_payload_preview", None)
+    if callable(fn):
+        return fn(data, student)
+    # 兼容旧引擎：只生成最小化预览，避免因文件版本不同导致整个应用崩溃。
+    snap = student_snapshot(data, student["student_id"])
+    return {
+        "student": {
+            "student_id": student.get("student_id"),
+            "grade": student.get("grade"),
+            "target_score": student.get("target_score"),
+            "teacher_notes": student.get("notes", ""),
+        },
+        "learning_snapshot": snap,
+        "engine_status": "legacy-compatible; please update ai_engine.py",
+    }
 
 st.set_page_config(page_title="旦旦物理 · AI教学工作台", page_icon="🧠", layout="wide")
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.1.1"
 
 st.markdown("""
 <style>
@@ -404,6 +427,7 @@ with tabs[9]:
         if AI_READY:
             st.success(f"百炼AI已配置：{QWEN_MODEL}")
             st.caption(f"Base URL：{DASHSCOPE_BASE_URL}")
+            st.caption(f"AI引擎：{AI_ENGINE_VERSION}")
         else:
             st.warning("尚未配置百炼 API，目前使用规则版报告。")
             st.code(

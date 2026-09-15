@@ -16,6 +16,7 @@ SYSTEM_RULES = """你是一名严谨的高中物理教学诊断助手。你的�
 
 DEFAULT_DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 DEFAULT_QWEN_MODEL = "qwen3.8-flash"
+ENGINE_VERSION = "1.1.1.1-qwen-cn"
 
 
 def ai_configured(api_key: str | None) -> bool:
